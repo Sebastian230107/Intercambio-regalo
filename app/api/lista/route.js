@@ -9,6 +9,7 @@ import {
   verificarClaveParaSorteo,
 } from '../../../lib/acciones';
 import { cambiarLista, leerLista } from '../../../lib/almacen';
+import { parsearFechaLima, verificarClaveOrganizador } from '../../../lib/fecha';
 import {
   claveCorrecta,
   COOKIE,
@@ -36,6 +37,8 @@ function responder(datos, yo, sesionNueva, extra = {}) {
         maximo: MAXIMO,
         habilitado: cantidad >= MINIMO,
       },
+      fechaLimite: datos.fechaLimite ?? null,
+      ahora: Date.now(),
       ...extra,
     },
     { headers: sinCache },
@@ -105,6 +108,28 @@ export async function POST(request) {
       }
       if (!intento.persona) throw new ErrorDeLista('Nombre o clave incorrectos.', 401);
       return responder(datos, intento.persona, crearSesion(intento.persona));
+    }
+
+    if (cuerpo.tipo === 'guardarFechaLimite') {
+      let auth;
+      const datos = await cambiarLista((actuales) => {
+        auth = verificarClaveOrganizador(actuales, cuerpo.clave);
+        if (auth.ok) {
+          if (!cuerpo.fechaLimite) {
+            delete actuales.fechaLimite;
+          } else {
+            actuales.fechaLimite = parsearFechaLima(cuerpo.fechaLimite);
+          }
+        }
+        return actuales;
+      });
+      if (auth.bloqueado) {
+        throw new ErrorDeLista('Demasiados intentos. Espera 15 minutos y vuelve a probar.', 429);
+      }
+      if (!auth.ok) {
+        throw new ErrorDeLista('Clave de organizador incorrecta.', 401);
+      }
+      return responder(datos, duenoDeSesion(datos, sesion));
     }
 
     if (cuerpo.tipo === 'sortear') {

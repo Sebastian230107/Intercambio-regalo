@@ -20,11 +20,13 @@ Para ejecutar la simulación de 10 000 sorteos:
 2. En vercel.com: **Add New > Project**, importa el repositorio y pulsa **Deploy**.
 3. Dentro del proyecto: pestaña **Storage > Create Storage > Blob**, acceso **Private**,
    ponle un nombre y pulsa **Create** (conectado a Production y Preview).
-4. En **Settings > Environment Variables**, agrega `SORTEO_SECRETO` con una cadena larga y aleatoria.
+4. En **Settings > Environment Variables**, agrega:
+   - `SORTEO_SECRETO`: cadena larga y aleatoria para cifrar el sorteo.
+   - `CLAVE_ORGANIZADOR`: clave de al menos 12 caracteres para gestionar la fecha límite.
 5. Ve a **Deployments** y haz **Redeploy** del último despliegue.
 
 Sin el paso 3 la web muestra el aviso "Falta conectar el almacenamiento".
-Sin el paso 4 el sorteo devolverá error 503 al intentar revelar resultados.
+Sin el paso 4 el sorteo o el panel del organizador devolverán error 503.
 Con Blob, el archivo `regalos.json` queda en tu Blob store y los datos se
 mantienen aunque vuelvas a desplegar.
 
@@ -39,12 +41,18 @@ Sin GitHub: ejecuta `npx vercel` en la carpeta, haz los pasos 3 y 4, y luego `np
 - Desde el primer sorteo no se pueden eliminar cuentas (sí cambiar el nombre).
 - Cada participante crea su lista con su nombre y una clave (mínimo 6 caracteres). Todos pueden **ver** las listas; cada uno solo puede **editar la suya**.
 
+## Fecha límite y organizador
+- El enlace discreto **Soy el organizador** abre un panel protegido por `CLAVE_ORGANIZADOR` (mínimo 12 caracteres, con bloqueo de 15 minutos tras 5 intentos fallidos) para definir, cambiar o quitar la fecha y hora límite en zona `America/Lima` (UTC-5).
+- Vencido el plazo, el servidor rechaza agregar, editar o eliminar regalos y eliminar listas; siguen funcionando ver listas, registrarse, entrar, cambiar nombre y el sorteo.
+
 ## Archivos
-- `app/page.js`: pantalla principal, listas y tarjeta de estado del sorteo
+- `app/page.js`: pantalla principal, listas, aviso de plazo y tarjeta de estado del sorteo
 - `app/amigo-secreto.js`: modal del sorteo, animaciones y revelación de regalos
+- `app/organizador.js`: panel modal del organizador para la fecha límite
 - `app/globals.css`: colores, estilo y animaciones
-- `app/api/lista/route.js`: lectura, guardado y endpoint del sorteo
+- `app/api/lista/route.js`: lectura, guardado, fecha límite y endpoint del sorteo
 - `lib/sorteo.js`: límites (`MINIMO`, `MAXIMO`), cifrado con `SORTEO_SECRETO` y algoritmo del sorteo
+- `lib/fecha.js`: validación de `CLAVE_ORGANIZADOR` y fechas en `America/Lima` (UTC-5)
 - `lib/acciones.js`: validaciones y permisos
 - `lib/seguridad.js`: claves y sesiones
 - `lib/almacen.js`: almacenamiento del JSON

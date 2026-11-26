@@ -2,9 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AmigoSecreto from './amigo-secreto';
+import PanelOrganizador from './organizador';
 
 const REGALO_VACIO = { nombre: '', detalle: '', precio: '', enlace: '' };
 const SORTEO_INICIAL = { cantidad: 0, minimo: 16, maximo: 17, habilitado: false };
+
+function formatearFechaLima(iso) {
+  return new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+    .format(new Date(iso))
+    .replace(/^([a-záéíóúñ]+),\s+/i, '$1 ');
+}
+
+function formatearCuentaRegresiva(ms) {
+  const totalSeg = Math.max(0, Math.floor(ms / 1000));
+  const dias = Math.floor(totalSeg / 86400);
+  const horas = Math.floor((totalSeg % 86400) / 3600);
+  const min = Math.floor((totalSeg % 3600) / 60);
+  const seg = totalSeg % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  if (dias > 0) return `${dias}d ${pad(horas)}h ${pad(min)}m ${pad(seg)}s`;
+  if (horas > 0) return `${pad(horas)}h ${pad(min)}m ${pad(seg)}s`;
+  return `${pad(min)}m ${pad(seg)}s`;
+}
 
 const contar = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
@@ -32,10 +59,28 @@ export default function Inicio() {
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [modalAbierto, setModalAbierto] = useState(false);
+  const [organizadorAbierto, setOrganizadorAbierto] = useState(false);
+  const [fechaLimite, setFechaLimite] = useState(null);
+  const [desfaseMs, setDesfaseMs] = useState(0);
+  const [restanteMs, setRestanteMs] = useState(null);
   const [celebrando, setCelebrando] = useState(false);
   const cambios = useRef(0);
   const panel = useRef(null);
   const prevHabilitado = useRef(false);
+
+  const aplicarRespuesta = useCallback((datos) => {
+    setParticipantes(datos.participantes);
+    if (datos.sorteo) setSorteo(datos.sorteo);
+    setYoId(datos.yo);
+    const desfase = typeof datos.ahora === 'number' ? datos.ahora - Date.now() : 0;
+    setDesfaseMs(desfase);
+    setFechaLimite(datos.fechaLimite ?? null);
+    if (datos.fechaLimite) {
+      setRestanteMs(Date.parse(datos.fechaLimite) - (Date.now() + desfase));
+    } else {
+      setRestanteMs(null);
+    }
+  }, []);
 
   const cargar = useCallback(async () => {
     const antes = cambios.current;
@@ -43,14 +88,27 @@ export default function Inicio() {
       const datos = await pedir();
       // Si se guardó algo mientras tanto, esta lectura ya es antigua.
       if (antes !== cambios.current) return;
-      setParticipantes(datos.participantes);
-      if (datos.sorteo) setSorteo(datos.sorteo);
-      setYoId(datos.yo);
+      aplicarRespuesta(datos);
       setError('');
     } catch (e) {
       setError(e.message);
     }
-  }, []);
+  }, [aplicarRespuesta]);
+
+  useEffect(() => {
+    if (!fechaLimite) {
+      setRestanteMs(null);
+      return undefined;
+    }
+    const objetivo = Date.parse(fechaLimite);
+    const actualizar = () => {
+      setRestanteMs(objetivo - (Date.now() + desfaseMs));
+    };
+    actualizar();
+    if (objetivo - (Date.now() + desfaseMs) <= 0) return undefined;
+    const id = setInterval(actualizar, 1000);
+    return () => clearInterval(id);
+  }, [fechaLimite, desfaseMs]);
 
   useEffect(() => {
     cargar();
@@ -97,9 +155,7 @@ export default function Inicio() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(accion),
       });
-      setParticipantes(datos.participantes);
-      if (datos.sorteo) setSorteo(datos.sorteo);
-      setYoId(datos.yo);
+      aplicarRespuesta(datos);
       return datos;
     } catch (e) {
       setError(e.message);
@@ -120,9 +176,7 @@ export default function Inicio() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tipo: 'sortear', clave }),
       });
-      setParticipantes(datos.participantes);
-      if (datos.sorteo) setSorteo(datos.sorteo);
-      setYoId(datos.yo);
+      aplicarRespuesta(datos);
       return { amigo: datos.amigo, primeraVez: datos.primeraVez };
     } catch (e) {
       if (e.estado === 401) setYoId(null);
@@ -132,6 +186,25 @@ export default function Inicio() {
     }
   }
 
+  async function guardarFechaOrganizador({ clave, fechaLimite: nuevaFecha }) {
+    cambios.current++;
+    try {
+      const datos = await pedir({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo: 'guardarFechaLimite',
+          clave,
+          fechaLimite: nuevaFecha || null,
+        }),
+      });
+      aplicarRespuesta(datos);
+    } finally {
+      cambios.current++;
+    }
+  }
+
+  const plazoCerrado = Boolean(fechaLimite && restanteMs !== null && restanteMs <= 0);
   const yo = participantes?.find((p) => p.id === yoId);
   const elegido = participantes?.find((p) => p.id === elegidoId) ?? yo ?? participantes?.[0];
   const totalRegalos = participantes?.reduce((suma, p) => suma + p.regalos.length, 0) ?? 0;
@@ -174,6 +247,14 @@ export default function Inicio() {
           !error && <p className="cargando" role="status">Cargando la lista…</p>
         ) : (
           <>
+            {fechaLimite && (
+              <AvisoPlazo
+                fechaLimite={fechaLimite}
+                restanteMs={restanteMs}
+                plazoCerrado={plazoCerrado}
+              />
+            )}
+
             <TarjetaSorteo
               sorteo={sorteo}
               yo={yo}
@@ -242,6 +323,7 @@ export default function Inicio() {
                   key={`${elegido.id}-${elegido.id === yoId}`}
                   persona={elegido}
                   esMia={elegido.id === yoId}
+                  plazoCerrado={plazoCerrado}
                   ocupado={ocupado}
                   guardar={guardar}
                 />
@@ -254,6 +336,16 @@ export default function Inicio() {
             </section>
           </div>
 
+          <footer className="pie-organizador">
+            <button
+              type="button"
+              className="enlace-discreto"
+              onClick={() => setOrganizadorAbierto(true)}
+            >
+              Soy el organizador
+            </button>
+          </footer>
+
           <AmigoSecreto
             abierto={modalAbierto}
             onCerrar={() => setModalAbierto(false)}
@@ -261,10 +353,39 @@ export default function Inicio() {
             yo={yo}
             onSortear={sortearConClave}
           />
+
+          <PanelOrganizador
+            abierto={organizadorAbierto}
+            onCerrar={() => setOrganizadorAbierto(false)}
+            fechaLimite={fechaLimite}
+            onGuardar={guardarFechaOrganizador}
+          />
         </>
         )}
       </main>
     </>
+  );
+}
+
+function AvisoPlazo({ fechaLimite, restanteMs, plazoCerrado }) {
+  const urgente = !plazoCerrado && restanteMs !== null && restanteMs < 3_600_000;
+  return (
+    <div
+      className={`aviso-plazo${plazoCerrado ? ' vencido' : urgente ? ' urgente' : ''}`}
+      role="status"
+      aria-live="polite"
+    >
+      <p className="aviso-plazo-texto">
+        {plazoCerrado
+          ? 'El plazo para anotar regalos terminó'
+          : `Tienes hasta el ${formatearFechaLima(fechaLimite)} para anotar tus regalos`}
+      </p>
+      {!plazoCerrado && restanteMs !== null && (
+        <span className="cuenta-regresiva" aria-label="Tiempo restante">
+          {formatearCuentaRegresiva(restanteMs)}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -398,12 +519,17 @@ function Acceso({ ocupado, registroCerrado, onEnviar }) {
   );
 }
 
-function Lista({ persona, esMia, ocupado, guardar }) {
+function Lista({ persona, esMia, plazoCerrado, ocupado, guardar }) {
   const [editandoNombre, setEditandoNombre] = useState(false);
   const [nombre, setNombre] = useState(persona.nombre);
   // null = formulario cerrado, 'nuevo' = agregando, o el id del regalo que se edita
   const [formulario, setFormulario] = useState(null);
   const participanteId = persona.id;
+  const puedeEditarRegalos = esMia && !plazoCerrado;
+
+  useEffect(() => {
+    if (plazoCerrado) setFormulario(null);
+  }, [plazoCerrado]);
 
   return (
     <>
@@ -442,18 +568,20 @@ function Lista({ persona, esMia, ocupado, guardar }) {
             >
               Cambiar nombre
             </button>
-            <button
-              type="button"
-              className="enlace peligro"
-              disabled={ocupado}
-              onClick={() => {
-                if (window.confirm('¿Eliminar tu lista y salir del intercambio?')) {
-                  guardar({ tipo: 'eliminarParticipante', participanteId });
-                }
-              }}
-            >
-              Eliminar mi lista
-            </button>
+            {!plazoCerrado && (
+              <button
+                type="button"
+                className="enlace peligro"
+                disabled={ocupado}
+                onClick={() => {
+                  if (window.confirm('¿Eliminar tu lista y salir del intercambio?')) {
+                    guardar({ tipo: 'eliminarParticipante', participanteId });
+                  }
+                }}
+              >
+                Eliminar mi lista
+              </button>
+            )}
           </div>}
         </div>
       )}
@@ -466,7 +594,7 @@ function Lista({ persona, esMia, ocupado, guardar }) {
 
       <ul className="regalos">
         {persona.regalos.map((r) =>
-          formulario === r.id ? (
+          puedeEditarRegalos && formulario === r.id ? (
             <li key={r.id}>
               <FormularioRegalo
                 inicial={r}
@@ -492,7 +620,7 @@ function Lista({ persona, esMia, ocupado, guardar }) {
                 )}
               </div>
               {r.precio && <span className="precio">S/ {Number(r.precio).toFixed(2)}</span>}
-              {esMia && <div className="acciones">
+              {puedeEditarRegalos && <div className="acciones">
                 <button type="button" className="enlace" onClick={() => setFormulario(r.id)}>
                   Editar
                 </button>
@@ -514,7 +642,7 @@ function Lista({ persona, esMia, ocupado, guardar }) {
         )}
       </ul>
 
-      {!esMia ? null : formulario === 'nuevo' ? (
+      {!puedeEditarRegalos ? null : formulario === 'nuevo' ? (
         <FormularioRegalo
           inicial={REGALO_VACIO}
           textoBoton="Guardar regalo"
