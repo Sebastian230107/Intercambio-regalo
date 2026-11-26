@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import AmigoSecreto from './amigo-secreto';
 
 const REGALO_VACIO = { nombre: '', detalle: '', precio: '', enlace: '' };
+const SORTEO_INICIAL = { cantidad: 0, minimo: 16, maximo: 17, habilitado: false };
 
 const contar = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
@@ -24,12 +26,16 @@ async function pedir(opciones) {
 
 export default function Inicio() {
   const [participantes, setParticipantes] = useState(null);
+  const [sorteo, setSorteo] = useState(SORTEO_INICIAL);
   const [elegidoId, setElegidoId] = useState(null);
   const [yoId, setYoId] = useState(null);
   const [error, setError] = useState('');
   const [ocupado, setOcupado] = useState(false);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [celebrando, setCelebrando] = useState(false);
   const cambios = useRef(0);
   const panel = useRef(null);
+  const prevHabilitado = useRef(false);
 
   const cargar = useCallback(async () => {
     const antes = cambios.current;
@@ -38,6 +44,7 @@ export default function Inicio() {
       // Si se guardó algo mientras tanto, esta lectura ya es antigua.
       if (antes !== cambios.current) return;
       setParticipantes(datos.participantes);
+      if (datos.sorteo) setSorteo(datos.sorteo);
       setYoId(datos.yo);
       setError('');
     } catch (e) {
@@ -47,10 +54,37 @@ export default function Inicio() {
 
   useEffect(() => {
     cargar();
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') cargar();
+    };
     // Al volver a la pestaña se traen los cambios de los demás.
     window.addEventListener('focus', cargar);
-    return () => window.removeEventListener('focus', cargar);
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      window.removeEventListener('focus', cargar);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
   }, [cargar]);
+
+  useEffect(() => {
+    if (participantes === null || sorteo.cantidad >= sorteo.maximo) return undefined;
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') cargar();
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [cargar, participantes, sorteo.cantidad, sorteo.maximo]);
+
+  useEffect(() => {
+    let id;
+    if (sorteo.habilitado && !prevHabilitado.current && participantes !== null) {
+      setCelebrando(true);
+      id = setTimeout(() => setCelebrando(false), 1800);
+    }
+    prevHabilitado.current = sorteo.habilitado;
+    return () => {
+      if (id) clearTimeout(id);
+    };
+  }, [sorteo.habilitado, participantes]);
 
   // Devuelve los datos nuevos si se guardó, o null si falló.
   async function guardar(accion) {
@@ -64,6 +98,7 @@ export default function Inicio() {
         body: JSON.stringify(accion),
       });
       setParticipantes(datos.participantes);
+      if (datos.sorteo) setSorteo(datos.sorteo);
       setYoId(datos.yo);
       return datos;
     } catch (e) {
@@ -74,6 +109,26 @@ export default function Inicio() {
     } finally {
       cambios.current++;
       setOcupado(false);
+    }
+  }
+
+  async function sortearConClave(clave) {
+    cambios.current++;
+    try {
+      const datos = await pedir({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'sortear', clave }),
+      });
+      setParticipantes(datos.participantes);
+      if (datos.sorteo) setSorteo(datos.sorteo);
+      setYoId(datos.yo);
+      return { amigo: datos.amigo, primeraVez: datos.primeraVez };
+    } catch (e) {
+      if (e.estado === 401) setYoId(null);
+      throw e;
+    } finally {
+      cambios.current++;
     }
   }
 
@@ -118,37 +173,46 @@ export default function Inicio() {
         {participantes === null ? (
           !error && <p className="cargando" role="status">Cargando la lista…</p>
         ) : (
-          <div className="columnas">
-            <section aria-labelledby="titulo-participantes" className="participantes">
-              {yo ? (
-                <div className="sesion">
-                  <p>
-                    Entraste como <strong>{yo.nombre}</strong>
-                  </p>
-                  <div className="acciones">
-                    <button type="button" className="enlace" onClick={() => elegir(yo.id)}>
-                      Ver mi lista
-                    </button>
-                    <button
-                      type="button"
-                      className="enlace"
-                      disabled={ocupado}
-                      onClick={() => guardar({ tipo: 'salir' })}
-                    >
-                      Cerrar sesión
-                    </button>
+          <>
+            <TarjetaSorteo
+              sorteo={sorteo}
+              yo={yo}
+              celebrando={celebrando}
+              onAbrir={() => setModalAbierto(true)}
+            />
+
+            <div className="columnas">
+              <section aria-labelledby="titulo-participantes" className="participantes">
+                {yo ? (
+                  <div className="sesion">
+                    <p>
+                      Entraste como <strong>{yo.nombre}</strong>
+                    </p>
+                    <div className="acciones">
+                      <button type="button" className="enlace" onClick={() => elegir(yo.id)}>
+                        Ver mi lista
+                      </button>
+                      <button
+                        type="button"
+                        className="enlace"
+                        disabled={ocupado}
+                        onClick={() => guardar({ tipo: 'salir' })}
+                      >
+                        Cerrar sesión
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <Acceso
-                  ocupado={ocupado}
-                  onEnviar={async (accion) => {
-                    const datos = await guardar(accion);
-                    if (datos) elegir(datos.yo);
-                    return Boolean(datos);
-                  }}
-                />
-              )}
+                ) : (
+                  <Acceso
+                    ocupado={ocupado}
+                    registroCerrado={sorteo.cantidad >= sorteo.maximo}
+                    onEnviar={async (accion) => {
+                      const datos = await guardar(accion);
+                      if (datos) elegir(datos.yo);
+                      return Boolean(datos);
+                    }}
+                  />
+                )}
               <h2 id="titulo-participantes">Participantes</h2>
               <ul className="etiquetas">
                 {participantes.map((p) => (
@@ -189,28 +253,114 @@ export default function Inicio() {
               )}
             </section>
           </div>
+
+          <AmigoSecreto
+            abierto={modalAbierto}
+            onCerrar={() => setModalAbierto(false)}
+            participantes={participantes}
+            yo={yo}
+            onSortear={sortearConClave}
+          />
+        </>
         )}
       </main>
     </>
   );
 }
 
-function Acceso({ ocupado, onEnviar }) {
-  const [tipo, setTipo] = useState('registrar');
+function TarjetaSorteo({ sorteo, yo, celebrando, onAbrir }) {
+  const { cantidad, minimo, maximo, habilitado } = sorteo;
+  const faltan = Math.max(0, minimo - cantidad);
+  const proporcion = Math.min(1, cantidad / minimo);
+  const puedeSortear = habilitado && Boolean(yo);
+
+  return (
+    <section
+      className={`tarjeta-sorteo${habilitado ? ' habilitado' : ''}${celebrando ? ' celebrando' : ''}`}
+      aria-labelledby="titulo-sorteo"
+    >
+      <div className="sorteo-info">
+        <div className="sorteo-encabezado">
+          <h2 id="titulo-sorteo">Sorteo del amig@ secret@</h2>
+          <span className="sorteo-contador">
+            {cantidad} de {minimo} registrados
+          </span>
+        </div>
+        <div
+          className="progreso-barra"
+          role="progressbar"
+          aria-valuenow={Math.min(cantidad, minimo)}
+          aria-valuemin={0}
+          aria-valuemax={minimo}
+          aria-label={`${cantidad} de ${minimo} registrados`}
+        >
+          <div className="progreso-relleno" style={{ transform: `scaleX(${proporcion})` }} />
+        </div>
+        <p className="sorteo-mensaje">
+          {!habilitado
+            ? `Faltan ${contar(faltan, 'participante', 'participantes')} para habilitar el sorteo.`
+            : cantidad < maximo
+              ? '¡Sorteo habilitado! Queda el cupo 17 disponible.'
+              : `¡Cupo completo! (${cantidad} de ${maximo} participantes).`}
+        </p>
+        {!yo && (
+          <p className="sorteo-invitacion">
+            {cantidad < maximo
+              ? 'Regístrate o entra con tu clave para participar en el sorteo.'
+              : 'Entra con tu clave para conocer a tu amig@ secret@.'}
+          </p>
+        )}
+      </div>
+
+      <div className="sorteo-accion">
+        <button
+          type="button"
+          className={`boton boton-sorteo${celebrando ? ' destello' : ''}`}
+          disabled={!puedeSortear}
+          onClick={onAbrir}
+        >
+          {!habilitado && (
+            <svg className="candado" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M17 10h-1V7a4 4 0 0 0-8 0v3H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-3a2 2 0 1 1 4 0v3h-4V7Z"
+              />
+            </svg>
+          )}
+          Conocer mi amig@ secret@
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function Acceso({ ocupado, registroCerrado, onEnviar }) {
+  const [tipo, setTipo] = useState(registroCerrado ? 'entrar' : 'registrar');
   const [nombre, setNombre] = useState('');
   const [clave, setClave] = useState('');
-  const esNuevo = tipo === 'registrar';
+
+  useEffect(() => {
+    if (registroCerrado) setTipo('entrar');
+  }, [registroCerrado]);
+
+  const esNuevo = !registroCerrado && tipo === 'registrar';
 
   return (
     <div className="acceso">
-      <div className="pestanas">
-        <button type="button" aria-pressed={esNuevo} onClick={() => setTipo('registrar')}>
-          Soy nuevo
-        </button>
-        <button type="button" aria-pressed={!esNuevo} onClick={() => setTipo('entrar')}>
-          Ya tengo lista
-        </button>
-      </div>
+      {!registroCerrado ? (
+        <div className="pestanas">
+          <button type="button" aria-pressed={esNuevo} onClick={() => setTipo('registrar')}>
+            Soy nuevo
+          </button>
+          <button type="button" aria-pressed={!esNuevo} onClick={() => setTipo('entrar')}>
+            Ya tengo lista
+          </button>
+        </div>
+      ) : (
+        <p className="registro-cerrado">
+          Se completaron los 17 cupos. Entra con tu nombre y clave.
+        </p>
+      )}
       <form
         onSubmit={async (e) => {
           e.preventDefault();

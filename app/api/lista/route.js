@@ -6,6 +6,7 @@ import {
   intentarIngreso,
   leerCredenciales,
   registrarParticipante,
+  verificarClaveParaSorteo,
 } from '../../../lib/acciones';
 import { cambiarLista, leerLista } from '../../../lib/almacen';
 import {
@@ -16,17 +17,26 @@ import {
   duenoDeSesion,
   protegerClave,
 } from '../../../lib/seguridad';
+import { MAXIMO, MINIMO, sortearPara } from '../../../lib/sorteo';
 
 export const dynamic = 'force-dynamic';
 
 const sinCache = { 'Cache-Control': 'no-store' };
 
-// Al navegador solo se envían estos campos: nunca las claves.
-function responder(datos, yo, sesionNueva) {
+// Al navegador solo se envían estos campos: nunca las claves ni resultados ajenos.
+function responder(datos, yo, sesionNueva, extra = {}) {
+  const cantidad = datos.participantes.length;
   const respuesta = NextResponse.json(
     {
       yo: yo?.id ?? null,
       participantes: datos.participantes.map(({ id, nombre, regalos }) => ({ id, nombre, regalos })),
+      sorteo: {
+        cantidad,
+        minimo: MINIMO,
+        maximo: MAXIMO,
+        habilitado: cantidad >= MINIMO,
+      },
+      ...extra,
     },
     { headers: sinCache },
   );
@@ -95,6 +105,32 @@ export async function POST(request) {
       }
       if (!intento.persona) throw new ErrorDeLista('Nombre o clave incorrectos.', 401);
       return responder(datos, intento.persona, crearSesion(intento.persona));
+    }
+
+    if (cuerpo.tipo === 'sortear') {
+      let intento;
+      let resultado;
+      let yo;
+      const datos = await cambiarLista((actuales) => {
+        yo = duenoDeSesion(actuales, sesion);
+        intento = verificarClaveParaSorteo(yo, cuerpo.clave, (guardada) =>
+          claveCorrecta(cuerpo.clave, guardada),
+        );
+        if (intento.persona) {
+          resultado = sortearPara(actuales, yo);
+        }
+        return actuales;
+      });
+      if (intento.bloqueado) {
+        throw new ErrorDeLista('Demasiados intentos. Espera 15 minutos y vuelve a probar.', 429);
+      }
+      if (!intento.persona) throw new ErrorDeLista('Clave incorrecta.', 401);
+      const amigo = datos.participantes.find((p) => p.id === resultado.receptorId);
+      if (!amigo) throw new ErrorDeLista('No se encontró al participante asignado.', 500);
+      return responder(datos, yo, undefined, {
+        amigo: { id: amigo.id, nombre: amigo.nombre, regalos: amigo.regalos },
+        primeraVez: resultado.primeraVez,
+      });
     }
 
     let yo;
