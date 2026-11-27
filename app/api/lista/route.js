@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import {
   aplicarAccion,
+  eliminarCuentaDuplicada,
   ErrorDeLista,
   intentarIngreso,
   leerCredenciales,
@@ -121,6 +122,23 @@ export async function POST(request) {
             actuales.fechaLimite = parsearFechaLima(cuerpo.fechaLimite);
           }
         }
+        return actuales;
+      });
+      if (auth.bloqueado) {
+        throw new ErrorDeLista('Demasiados intentos. Espera 15 minutos y vuelve a probar.', 429);
+      }
+      if (!auth.ok) {
+        throw new ErrorDeLista('Clave de organizador incorrecta.', 401);
+      }
+      return responder(datos, duenoDeSesion(datos, sesion));
+    }
+
+    if (cuerpo.tipo === 'eliminarDuplicado') {
+      let auth;
+      // Un intento con clave errada se guarda, para que funcione el bloqueo.
+      const datos = await cambiarLista((actuales) => {
+        auth = verificarClaveOrganizador(actuales, cuerpo.clave);
+        if (auth.ok) eliminarCuentaDuplicada(actuales, cuerpo.participanteId);
         return actuales;
       });
       if (auth.bloqueado) {

@@ -204,6 +204,20 @@ export default function Inicio() {
     }
   }
 
+  async function eliminarCuentaOrganizador({ clave, participanteId }) {
+    cambios.current++;
+    try {
+      const datos = await pedir({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'eliminarDuplicado', clave, participanteId }),
+      });
+      aplicarRespuesta(datos);
+    } finally {
+      cambios.current++;
+    }
+  }
+
   const plazoCerrado = Boolean(fechaLimite && restanteMs !== null && restanteMs <= 0);
   const yo = participantes?.find((p) => p.id === yoId);
   const elegido = participantes?.find((p) => p.id === elegidoId) ?? yo ?? participantes?.[0];
@@ -359,6 +373,8 @@ export default function Inicio() {
             onCerrar={() => setOrganizadorAbierto(false)}
             fechaLimite={fechaLimite}
             onGuardar={guardarFechaOrganizador}
+            participantes={participantes}
+            onEliminar={eliminarCuentaOrganizador}
           />
         </>
         )}

@@ -915,6 +915,41 @@ li>.formulario {
   font-weight: 400;
 }
 
+.modal-seccion {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 2px dashed var(--borde);
+}
+
+.modal-seccion select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  background: var(--papel);
+  color: var(--tinta);
+  font: inherit;
+  font-weight: 400;
+}
+
+.modal-seccion .aviso {
+  margin-bottom: 0;
+}
+
+.modal-exito {
+  padding: 12px 14px;
+  background: var(--fondo);
+  border: 1.5px solid var(--pino);
+  border-radius: 12px;
+}
+
+.modal-confirmar {
+  display: grid;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+
 /* Escena 1: Caja de regalo que se abre */
 .escena-caja,
 .escena-ruleta {

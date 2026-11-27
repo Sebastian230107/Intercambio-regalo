@@ -22,12 +22,24 @@ export default function PanelOrganizador({
   onCerrar,
   fechaLimite,
   onGuardar,
+  participantes,
+  onEliminar,
 }) {
   const dialogoRef = useRef(null);
   const [clave, setClave] = useState('');
   const [fecha, setFecha] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
+
+  const [cuentaId, setCuentaId] = useState('');
+  const [claveEliminar, setClaveEliminar] = useState('');
+  const [confirmando, setConfirmando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState('');
+  const [exito, setExito] = useState('');
+  const cuenta = participantes.find((p) => p.id === cuentaId);
+
+  const describir = (p) =>
+    `${p.nombre} (${p.regalos.length} ${p.regalos.length === 1 ? 'regalo' : 'regalos'})`;
 
   useEffect(() => {
     const dialogo = dialogoRef.current;
@@ -36,6 +48,11 @@ export default function PanelOrganizador({
       setFecha(paraInputLima(fechaLimite));
       setClave('');
       setError('');
+      setCuentaId('');
+      setClaveEliminar('');
+      setConfirmando(false);
+      setErrorEliminar('');
+      setExito('');
       dialogo.showModal();
     } else if (!abierto && dialogo.open) {
       dialogo.close();
@@ -53,6 +70,23 @@ export default function PanelOrganizador({
     } catch (e) {
       setError(e.message || 'No se pudo guardar la fecha límite.');
     } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function eliminar() {
+    if (ocupado || !cuenta) return;
+    setOcupado(true);
+    setErrorEliminar('');
+    try {
+      await onEliminar({ clave: claveEliminar, participanteId: cuenta.id });
+      setExito(`Se eliminó la cuenta ${describir(cuenta)}.`);
+      setCuentaId('');
+      setClaveEliminar('');
+    } catch (e) {
+      setErrorEliminar(e.message || 'No se pudo eliminar la cuenta.');
+    } finally {
+      setConfirmando(false);
       setOcupado(false);
     }
   }
@@ -133,6 +167,87 @@ export default function PanelOrganizador({
               Cancelar
             </button>
           </div>
+        </form>
+
+        <form
+          className="modal-clave modal-seccion"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setErrorEliminar('');
+            setExito('');
+            setConfirmando(true);
+          }}
+        >
+          <h3>Eliminar cuenta duplicada</h3>
+          <p>
+            Borra la cuenta y su lista de regalos. Solo se puede antes de que comience el sorteo.
+          </p>
+          {errorEliminar && (
+            <div className="aviso" role="alert">
+              <span>{errorEliminar}</span>
+            </div>
+          )}
+          {exito && (
+            <p className="modal-exito" role="status">
+              {exito} Quedan {participantes.length} participantes.
+            </p>
+          )}
+          <label>
+            Cuenta a eliminar
+            <select
+              value={cuenta ? cuentaId : ''}
+              required
+              disabled={ocupado || confirmando}
+              onChange={(e) => setCuentaId(e.target.value)}
+            >
+              <option value="" disabled>
+                Elige una cuenta
+              </option>
+              {participantes.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {describir(p)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Clave del organizador
+            <input
+              type="password"
+              value={claveEliminar}
+              minLength={12}
+              autoComplete="current-password"
+              required
+              disabled={ocupado || confirmando}
+              onChange={(e) => setClaveEliminar(e.target.value)}
+            />
+          </label>
+          {confirmando && cuenta ? (
+            <div className="modal-confirmar" role="alert">
+              <p>
+                ¿Eliminar la cuenta <strong>{describir(cuenta)}</strong>? No se puede deshacer.
+              </p>
+              <div className="botones">
+                <button type="button" className="boton" disabled={ocupado} onClick={eliminar}>
+                  {ocupado ? 'Eliminando…' : 'Sí, eliminar'}
+                </button>
+                <button
+                  type="button"
+                  className="boton secundario"
+                  disabled={ocupado}
+                  onClick={() => setConfirmando(false)}
+                >
+                  No, conservar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="botones">
+              <button className="boton" disabled={ocupado}>
+                Eliminar cuenta
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </dialog>
