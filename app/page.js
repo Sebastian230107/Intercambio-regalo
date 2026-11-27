@@ -5,7 +5,7 @@ import AmigoSecreto from './amigo-secreto';
 import PanelOrganizador from './organizador';
 
 const REGALO_VACIO = { nombre: '', detalle: '', precio: '', enlace: '' };
-const SORTEO_INICIAL = { cantidad: 0, minimo: 16, maximo: 17, habilitado: false };
+const SORTEO_INICIAL = { cantidad: 0, minimo: 17, maximo: 17, habilitado: false };
 
 function formatearFechaLima(iso) {
   return new Intl.DateTimeFormat('es-PE', {
